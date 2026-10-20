@@ -17,6 +17,41 @@ function fromDb(c){return {id:c.id,name:c.nome,city:c.cidade||'',phone:c.whatsap
 function toDb(c){return {id:c.id,usuario_id:user.id,nome:c.name,cidade:c.city||null,whatsapp:c.phone||null,status:c.status,valor_proposta:c.amount===null?null:c.amount,proximo_contato:c.next||null,observacoes:c.notes||null,site:c.url||null}}
 async function load(){if(!user)return;msg('Sincronizando...');const {data,error}=await db.from('clientes').select('*').order('criado_em',{ascending:false}).limit(1000);if(error)return msg('Falha ao carregar: '+error.message,true);clients=data.map(fromDb);render();msg('Sincronizado com o Supabase.')}
 function render(){const q=$('search').value.toLowerCase();const list=clients.filter(c=>(c.name+' '+c.city).toLowerCase().includes(q));$('total').textContent=clients.length;$('won').textContent=clients.filter(c=>c.status==='Venda realizada').length;$('revenue').textContent=fmt.format(clients.filter(c=>c.status==='Venda realizada'&&c.amount!=null).reduce((s,c)=>s+Number(c.amount),0));$('rows').innerHTML=list.map(c=>`<tr><td><strong>${esc(c.name)}</strong><div class="muted">${esc(c.city)}</div></td><td>${esc(c.status)}</td><td>${c.amount==null?'—':fmt.format(c.amount)}</td><td>${esc(c.next||'—')}</td><td><button class="btn" data-edit="${esc(c.id)}">Editar</button></td></tr>`).join('')||'<tr><td colspan="5">Nenhuma empresa encontrada.</td></tr>';document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>edit(b.dataset.edit))}
+
+const PIPELINE_STATUSES=['Prospecto','Contatado','Demonstração','Negociação','Venda realizada','Sem interesse'];
+function renderExtra(){
+ const today=new Date().toLocaleDateString('en-CA');
+ const due=clients.filter(c=>c.next&&c.next<=today&&c.status!=='Venda realizada'&&c.status!=='Sem interesse');
+ $('negotiating').textContent=clients.filter(c=>c.status==='Negociação').length;
+ $('pending').textContent=due.length;
+ const won=clients.filter(c=>c.status==='Venda realizada').length;
+ $('conversion').textContent=(clients.length?Math.round(won/clients.length*100):0)+'%';
+ const pipeline=$('pipeline');pipeline.replaceChildren();
+ for(const status of PIPELINE_STATUSES){
+  const items=clients.filter(c=>c.status===status);
+  const col=document.createElement('section');col.className='kanban-col';col.dataset.status=status;
+  const head=document.createElement('h3');head.textContent=status;const count=document.createElement('span');count.className='count';count.textContent=items.length;head.append(count);col.append(head);
+  for(const c of items){const card=document.createElement('div');card.className='kanban-card';card.draggable=true;card.dataset.id=c.id;
+   const name=document.createElement('strong');name.textContent=c.name;const city=document.createElement('small');city.textContent=c.city||'Cidade não informada';card.append(name,city);
+   if(c.amount!=null){const price=document.createElement('small');price.textContent=fmt.format(c.amount);card.append(price)}
+   const btn=document.createElement('button');btn.className='btn';btn.textContent='Editar';btn.onclick=()=>edit(c.id);card.append(btn);
+   card.addEventListener('dragstart',e=>{e.dataTransfer.setData('text/plain',c.id);e.dataTransfer.effectAllowed='move'});col.append(card)}
+  col.addEventListener('dragover',e=>{e.preventDefault();col.classList.add('drag-over')});col.addEventListener('dragleave',()=>col.classList.remove('drag-over'));
+  col.addEventListener('drop',async e=>{e.preventDefault();col.classList.remove('drag-over');const id=e.dataTransfer.getData('text/plain');const c=clients.find(x=>x.id===id);if(!c||c.status===status)return;
+   const old=c.status;c.status=status;render();const {error}=await db.from('clientes').update({status}).eq('id',id).eq('usuario_id',user.id);
+   if(error){c.status=old;render();msg('Não foi possível alterar o status: '+error.message,true)}else msg('Etapa atualizada com sucesso.')});pipeline.append(col)
+ }
+ const chart=$('statusChart');chart.replaceChildren();
+ for(const status of PIPELINE_STATUSES){const n=clients.filter(c=>c.status===status).length;const row=document.createElement('div');row.className='chart-row';
+  const name=document.createElement('span');name.textContent=status;const track=document.createElement('div');track.className='chart-track';const fill=document.createElement('div');fill.className='chart-fill';fill.style.width=(clients.length?100*n/clients.length:0)+'%';track.append(fill);const value=document.createElement('strong');value.textContent=n;row.append(name,track,value);chart.append(row)}
+ const follow=$('followups');follow.replaceChildren();const upcoming=clients.filter(c=>c.next&&c.status!=='Venda realizada'&&c.status!=='Sem interesse').sort((a,b)=>a.next.localeCompare(b.next)).slice(0,7);
+ if(!upcoming.length){const empty=document.createElement('p');empty.className='muted';empty.textContent='Nenhum contato agendado.';follow.append(empty)}
+ for(const c of upcoming){const row=document.createElement('div');row.className='followup';const label=document.createElement('div');const name=document.createElement('strong');name.textContent=c.name;const when=document.createElement('small');when.textContent=' · '+c.next+(c.next<today?' · Atrasado':c.next===today?' · Hoje':'');label.append(name,when);
+ const btn=document.createElement('button');btn.className='btn';btn.textContent='Abrir';btn.onclick=()=>edit(c.id);row.append(label,btn);follow.append(row)}
+}
+const originalRender=render;
+render=function(){originalRender();renderExtra()};
+
 $('search').oninput=render;$('reload').onclick=load;
 function edit(id){editing=id||null;const c=clients.find(x=>x.id===id)||{};const f=$('form');for(const k of ['name','city','phone','status','amount','next','url','notes'])f.elements[k].value=c[k]??(k==='status'?'Prospecto':'');$('editTitle').textContent=id?'Editar empresa':'Nova empresa';show('editpanel')}
 $('new').onclick=()=>edit(null);$('cancel').onclick=()=>show('app');
