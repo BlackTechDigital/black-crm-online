@@ -22,10 +22,10 @@ const PIPELINE_STATUSES=['Prospecto','Contatado','Demonstração','Negociação'
 function renderExtra(){
  const today=new Date().toLocaleDateString('en-CA');
  const due=clients.filter(c=>c.next&&c.next<=today&&c.status!=='Venda realizada'&&c.status!=='Sem interesse');
- $('negotiating').textContent=clients.filter(c=>c.status==='Negociação').length;
- $('pending').textContent=due.length;
+ if($('negotiating'))$('negotiating').textContent=clients.filter(c=>c.status==='Negociação').length;
+ if($('pending'))$('pending').textContent=due.length;
  const won=clients.filter(c=>c.status==='Venda realizada').length;
- $('conversion').textContent=(clients.length?Math.round(won/clients.length*100):0)+'%';
+ if($('conversion'))$('conversion').textContent=(clients.length?Math.round(won/clients.length*100):0)+'%';
  const pipeline=$('pipeline');pipeline.replaceChildren();
  for(const status of PIPELINE_STATUSES){
   const items=clients.filter(c=>c.status===status);
