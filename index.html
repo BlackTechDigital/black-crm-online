@@ -47,6 +47,8 @@ body{background:radial-gradient(ellipse 85% 40% at 50% -10%,#12376c 0%,#070b15 7
 .finance-note{background:#0c213c;border:1px solid #315685;border-radius:10px;padding:12px;font-size:13px;color:#c1d5f2;margin-top:15px}
 @media(max-width:900px){.finance-form{grid-template-columns:1fr 1fr}.finance-form>div:first-child{grid-column:1/-1}}
 @media(max-width:540px){.finance-form{grid-template-columns:1fr}.finance-form>div:first-child{grid-column:auto}}
+</style><style>
+.ops-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}.ops-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;align-items:end}.ops-form label{margin:0 0 6px;font-size:12px}.ops-form .wide{grid-column:1/-1}.ops-list{display:grid;gap:10px;margin-top:16px}.ops-item{padding:13px;background:#0a182b;border:1px solid #294269;border-radius:12px}.ops-item .row{justify-content:space-between}.ops-tag{font-size:12px;border:1px solid #395b87;border-radius:20px;padding:3px 9px}.ops-alert{color:#ffb7b7}.ops-complete{opacity:.6}.ops-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.ops-stats>div{padding:12px;border:1px solid #294269;border-radius:10px}.ops-stats strong{display:block;font-size:23px;margin-top:4px}@media(max-width:600px){.ops-stats{grid-template-columns:1fr}}
 </style></head><body><div class="wrap"><div class="top"><div><div class="brand">BLACK <span>CRM</span> <small style="font-size:12px;color:#91a8cc">ONLINE</small></div><div class="muted">Black Tech · Acesso protegido</div></div><button class="btn hide" id="logout">Sair</button></div>
 <div id="setup" class="card hide"><h2>Configurar conexão</h2><p class="muted">Informe somente a chave <strong>sb_publishable_</strong>. Nunca use uma chave secreta.</p><label>Project URL</label><input id="url" value="https://mkotuyaoactpotvizqhg.supabase.co" readonly><label>Publishable key</label><input id="key" placeholder="sb_publishable_..." autocomplete="off"><p><button class="btn primary" id="connect">Conectar</button></p></div>
 <div id="login" class="card hide"><h2>Entrar no BLACK CRM</h2><label>E-mail</label><input type="email" id="email" autocomplete="username"><label>Senha</label><input type="password" id="password" autocomplete="current-password"><p><button class="btn primary" id="signin">Entrar</button></p><p class="hint">Use o usuário criado em Authentication → Users no Supabase. O cadastro público está desativado.</p></div>
@@ -96,10 +98,39 @@ body{background:radial-gradient(ellipse 85% 40% at 50% -10%,#12376c 0%,#070b15 7
  <div class="tablewrap"><table class="finance-table"><thead><tr><th>Data</th><th>Empresa</th><th>Valor</th><th>Forma</th><th>Ações</th></tr></thead><tbody id="financeRows"><tr><td colspan="5">Nenhum recebimento registrado.</td></tr></tbody></table></div>
  <p class="finance-note"><strong>Importante:</strong> os recebimentos agora são sincronizados com o Supabase. Para trazer registros do CRM 3.5, use “Migrar pagamentos locais 3.5” neste mesmo navegador ou importe seu backup JSON. Guarde o backup até confirmar a migração. O saldo a receber é uma estimativa baseada nas vendas marcadas como realizadas; não inclui parcelas futuras nem ajustes de contratos.</p>
 </div>
+
+<div class="card" id="operationsCard">
+ <div class="section-title"><h2>📅 Agenda inteligente</h2><span class="eyebrow">BLACK TECH 5.0</span></div>
+ <p class="muted">Organize o próximo contato, as entregas e os compromissos da agência.</p>
+ <div class="ops-stats"><div><span class="muted">Atrasadas</span><strong id="tasksOverdue">—</strong></div><div><span class="muted">Para hoje</span><strong id="tasksToday">—</strong></div><div><span class="muted">Próximos 7 dias</span><strong id="tasksWeek">—</strong></div></div>
+ <h3>Nova tarefa</h3><form id="taskForm" class="ops-form">
+ <div><label for="taskTitle">O que fazer? *</label><input id="taskTitle" maxlength="160" required placeholder="Ex.: Enviar demonstração"></div>
+ <div><label for="taskClient">Empresa (opcional)</label><select id="taskClient"><option value="">Sem empresa vinculada</option></select></div>
+ <div><label for="taskDate">Data *</label><input id="taskDate" type="date" required></div>
+ <div><label for="taskPriority">Prioridade</label><select id="taskPriority"><option>Normal</option><option>Alta</option><option>Baixa</option></select></div>
+ <button class="btn primary" type="submit">+ Adicionar tarefa</button>
+ </form>
+ <div class="row" style="margin-top:18px"><label for="taskFilter" style="margin:0">Mostrar</label><select id="taskFilter" style="max-width:230px"><option value="pending">Pendentes</option><option value="all">Todas</option><option value="done">Concluídas</option></select></div>
+ <div id="tasksList" class="ops-list"><p class="muted">Aguardando conexão...</p></div>
+</div>
+<div class="card" id="contactHistoryCard">
+ <div class="section-title"><h2>📞 Histórico de contatos</h2><span class="eyebrow">RELACIONAMENTO COM CLIENTES</span></div>
+ <p class="muted">Registre cada conversa e nunca perca o contexto de uma negociação.</p>
+ <form id="contactForm" class="ops-form">
+ <div><label for="contactClient">Empresa *</label><select id="contactClient" required></select></div>
+ <div><label for="contactDate">Data *</label><input id="contactDate" type="date" required></div>
+ <div><label for="contactChannel">Canal</label><select id="contactChannel"><option>WhatsApp</option><option>Instagram</option><option>Ligação</option><option>E-mail</option><option>Presencial</option><option>Outro</option></select></div>
+ <div><label for="contactOutcome">Resultado</label><select id="contactOutcome"><option>Aguardando resposta</option><option>Respondeu</option><option>Interessado</option><option>Sem interesse</option><option>Proposta enviada</option><option>Venda fechada</option><option>Outro</option></select></div>
+ <div class="wide"><label for="contactNotes">Resumo da conversa *</label><textarea id="contactNotes" rows="2" maxlength="2000" required placeholder="O que foi conversado? Qual será o próximo passo?"></textarea></div>
+ <button class="btn primary" type="submit">+ Registrar contato</button>
+ </form>
+ <div class="row" style="margin-top:18px"><label for="contactFilter" style="margin:0">Filtrar empresa</label><select id="contactFilter" style="max-width:300px"><option value="">Todas as empresas</option></select></div>
+ <div id="contactsList" class="ops-list"><p class="muted">Aguardando conexão...</p></div>
+</div>
 <div class="card"><div class="section-title"><h2>Funil de vendas</h2><span class="hint">Arraste empresas entre as etapas para atualizar o status</span></div><div id="pipeline"></div></div>
 <div class="grid"><div class="card"><h2>Distribuição por etapa</h2><div id="statusChart" class="chart-bars"></div></div><div class="card"><h2>Próximos contatos</h2><div id="followups"></div></div></div>
 <div class="card"><h2>Empresas</h2><input id="search" placeholder="Pesquisar empresa ou cidade"><div class="tablewrap"><table><thead><tr><th>Empresa</th><th>Status</th><th>Valor</th><th>Próximo contato</th><th>Ações</th></tr></thead><tbody id="rows"></tbody></table></div></div></div>
 <div id="editpanel" class="card hide"><h2 id="editTitle">Empresa</h2><form id="form"><div class="grid"><div><label>Nome *</label><input name="name" required maxlength="120"></div><div><label>Cidade</label><input name="city" maxlength="100"></div><div><label>WhatsApp</label><input name="phone" maxlength="25"></div><div><label>Status</label><select name="status"><option>Prospecto</option><option>Contatado</option><option>Demonstração</option><option>Negociação</option><option>Venda realizada</option><option>Sem interesse</option></select></div><div><label>Valor (R$)</label><input name="amount" type="number" min="0" step=".01"></div><div><label>Próximo contato</label><input name="next" type="date"></div><div><label>Site</label><input name="url" type="url"></div></div><label>Observações</label><textarea name="notes" rows="3" maxlength="2000"></textarea><p class="row"><button class="btn primary" type="submit">Salvar</button><button class="btn" type="button" id="cancel">Cancelar</button></p></form></div>
 <div id="propanel" class="card hide"><h2>Proposta comercial</h2><label>Empresa</label><select id="propClient"></select><label>Serviço</label><input id="service" value="Criação de site profissional"><label>Descrição</label><textarea id="details" rows="3">Desenvolvimento de site responsivo com apresentação da empresa, serviços e contato por WhatsApp.</textarea><div class="grid"><div><label>Valor (R$)</label><input id="price" type="number" min="0" step=".01"></div><div><label>Prazo</label><input id="deadline" placeholder="Ex.: 10 dias úteis"></div></div><p class="row"><button class="btn primary" id="print">Abrir proposta para salvar em PDF</button><button class="btn" id="closeProp">Fechar</button></p></div>
 <p id="msg" role="status" class="hint"></p></div>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script><script src="app.js?v=4.0-cloud-1"></script></body></html>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script><script src="app.js?v=5.0-ops-1"></script></body></html>
