@@ -7,8 +7,8 @@ function show(id){for(const n of ['setup','login','app','editpanel','propanel'])
 function msg(t,err=false){$('msg').textContent=t;$('msg').className=err?'error':'ok'}
 function init(key){if(!window.supabase?.createClient){msg('Biblioteca do Supabase não carregou. Verifique a conexão com a internet.',true);return}
 db=window.supabase.createClient(PROJECT,key,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:false}});
-db.auth.onAuthStateChange((_event,session)=>{const previous=user?.id;user=session?.user||null;if(!user){show('login');clients=[]}else if(previous!==user.id){show('app');setTimeout(load,0)}});
-db.auth.getSession().then(({data,error})=>{if(error)throw error;user=data.session?.user||null;show(user?'app':'login');if(user)load()}).catch(e=>msg(e.message,true))}
+db.auth.onAuthStateChange((_event,session)=>{const previous=user?.id;user=session?.user||null;if(!user){show('login');clients=[]}else if(previous!==user.id){show('app');restoreGoal();setTimeout(load,0)}});
+db.auth.getSession().then(({data,error})=>{if(error)throw error;user=data.session?.user||null;show(user?'app':'login');if(user){restoreGoal();load()}}).catch(e=>msg(e.message,true))}
 const saved=localStorage.getItem(K);if(saved&&saved.startsWith('sb_publishable_'))init(saved);else show('setup');
 $('connect').onclick=()=>{const k=$('key').value.trim();if(!/^sb_publishable_[A-Za-z0-9_-]+$/.test(k))return msg('Informe uma publishable key válida.',true);localStorage.setItem(K,k);init(k)};
 $('signin').onclick=async()=>{if(!db)return;msg('Entrando...');const {error}=await db.auth.signInWithPassword({email:$('email').value.trim(),password:$('password').value});$('password').value='';if(error)msg('Não foi possível entrar. Confira e-mail, senha e confirmação da conta.',true)};
@@ -18,8 +18,34 @@ function toDb(c){return {id:c.id,usuario_id:user.id,nome:c.name,cidade:c.city||n
 async function load(){if(!user)return;msg('Sincronizando...');const {data,error}=await db.from('clientes').select('*').order('criado_em',{ascending:false}).limit(1000);if(error)return msg('Falha ao carregar: '+error.message,true);clients=data.map(fromDb);render();msg('Sincronizado com o Supabase.')}
 function render(){const q=$('search').value.toLowerCase();const list=clients.filter(c=>(c.name+' '+c.city).toLowerCase().includes(q));$('total').textContent=clients.length;$('won').textContent=clients.filter(c=>c.status==='Venda realizada').length;$('revenue').textContent=fmt.format(clients.filter(c=>c.status==='Venda realizada'&&c.amount!=null).reduce((s,c)=>s+Number(c.amount),0));$('rows').innerHTML=list.map(c=>`<tr><td><strong>${esc(c.name)}</strong><div class="muted">${esc(c.city)}</div></td><td>${esc(c.status)}</td><td>${c.amount==null?'—':fmt.format(c.amount)}</td><td>${esc(c.next||'—')}</td><td><button class="btn" data-edit="${esc(c.id)}">Editar</button></td></tr>`).join('')||'<tr><td colspan="5">Nenhuma empresa encontrada.</td></tr>';document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>edit(b.dataset.edit));renderExtra()}
 
+const GOALS=[1000,2000,3000,5000,7500,10000,15000,20000,30000,50000,75000,100000];
+let goalIndex=0;
+function goalStorageKey(){return 'blacktech_crm_goal_v3_'+(user?.id||'guest')}
+function restoreGoal(){try{const n=Number(localStorage.getItem(goalStorageKey()));goalIndex=Number.isInteger(n)&&n>=0&&n<GOALS.length?n:0}catch{goalIndex=0}}
+function renderGoals(){
+ const target=GOALS[goalIndex];
+ const sold=clients.filter(c=>c.status==='Venda realizada'&&c.amount!=null).reduce((sum,c)=>sum+Number(c.amount),0);
+ const percent=target>0?Math.min(100,Math.max(0,sold/target*100)):0;
+ $('goalTarget').textContent=fmt.format(target);
+ $('goalFill').style.width=percent+'%';
+ $('goalTrack').setAttribute('aria-valuenow',String(Math.round(percent)));
+ $('goalProgress').textContent=percent.toLocaleString('pt-BR',{maximumFractionDigits:1})+'% concluído';
+ $('goalRemaining').textContent=sold>=target?'Meta alcançada!':('Faltam '+fmt.format(target-sold));
+ $('goalNext').textContent=goalIndex+1<GOALS.length?fmt.format(GOALS[goalIndex+1]):'Último marco atingido';
+ $('goalAdvance').disabled=sold<target||goalIndex>=GOALS.length-1;
+ $('goalMessage').textContent=sold>=target?'🏆 Parabéns! Você atingiu esta meta. Avance quando quiser.':'Continue fechando vendas para alcançar o próximo marco.';
+ const wrap=$('goalMilestones');wrap.replaceChildren();
+ GOALS.forEach((value,i)=>{const chip=document.createElement('span');chip.className='goal-chip'+(i===goalIndex?' active':i<goalIndex?' done':'');chip.textContent=(i<goalIndex?'✓ ':'')+fmt.format(value);wrap.append(chip)});
+}
+$('goalAdvance').onclick=()=>{
+ const sold=clients.filter(c=>c.status==='Venda realizada'&&c.amount!=null).reduce((sum,c)=>sum+Number(c.amount),0);
+ if(sold<GOALS[goalIndex]||goalIndex>=GOALS.length-1)return;
+ goalIndex++;try{localStorage.setItem(goalStorageKey(),String(goalIndex))}catch{}
+ renderGoals();msg('Nova meta desbloqueada! 🚀');
+};
 const PIPELINE_STATUSES=['Prospecto','Contatado','Demonstração','Negociação','Venda realizada','Sem interesse'];
 function renderExtra(){
+ renderGoals();
  const today=new Date().toLocaleDateString('en-CA');
  const due=clients.filter(c=>c.next&&c.next<=today&&c.status!=='Venda realizada'&&c.status!=='Sem interesse');
  if($('negotiating'))$('negotiating').textContent=clients.filter(c=>c.status==='Negociação').length;
