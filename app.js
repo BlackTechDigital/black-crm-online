@@ -7,8 +7,8 @@ function show(id){for(const n of ['setup','login','app','editpanel','propanel'])
 function msg(t,err=false){$('msg').textContent=t;$('msg').className=err?'error':'ok'}
 function init(key){if(!window.supabase?.createClient){msg('Biblioteca do Supabase não carregou. Verifique a conexão com a internet.',true);return}
 db=window.supabase.createClient(PROJECT,key,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:false}});
-db.auth.onAuthStateChange((_event,session)=>{const previous=user?.id;user=session?.user||null;if(!user){show('login');clients=[]}else if(previous!==user.id){show('app');restoreGoal();setTimeout(load,0)}});
-db.auth.getSession().then(({data,error})=>{if(error)throw error;user=data.session?.user||null;show(user?'app':'login');if(user){restoreGoal();load()}}).catch(e=>msg(e.message,true))}
+db.auth.onAuthStateChange((_event,session)=>{const previous=user?.id;user=session?.user||null;if(!user){show('login');clients=[]}else if(previous!==user.id){show('app');restoreGoal();loadReceipts();setTimeout(load,0)}});
+db.auth.getSession().then(({data,error})=>{if(error)throw error;user=data.session?.user||null;show(user?'app':'login');if(user){restoreGoal();loadReceipts();load()}}).catch(e=>msg(e.message,true))}
 const saved=localStorage.getItem(K);if(saved&&saved.startsWith('sb_publishable_'))init(saved);else show('setup');
 $('connect').onclick=()=>{const k=$('key').value.trim();if(!/^sb_publishable_[A-Za-z0-9_-]+$/.test(k))return msg('Informe uma publishable key válida.',true);localStorage.setItem(K,k);init(k)};
 $('signin').onclick=async()=>{if(!db)return;msg('Entrando...');const {error}=await db.auth.signInWithPassword({email:$('email').value.trim(),password:$('password').value});$('password').value='';if(error)msg('Não foi possível entrar. Confira e-mail, senha e confirmação da conta.',true)};
@@ -43,9 +43,83 @@ $('goalAdvance').onclick=()=>{
  goalIndex++;try{localStorage.setItem(goalStorageKey(),String(goalIndex))}catch{}
  renderGoals();msg('Nova meta desbloqueada! 🚀');
 };
+
+/* Financeiro 3.5 — armazenamento local, isolado por usuário. */
+let receipts=[];
+function financeKey(){return 'blacktech_crm_receipts_v1_'+(user?.id||'guest')}
+function loadReceipts(){
+ try{const parsed=JSON.parse(localStorage.getItem(financeKey())||'[]');receipts=Array.isArray(parsed)?parsed.filter(validReceipt):[]}catch{receipts=[]}
+}
+function validReceipt(r){
+ return r&&typeof r.id==='string'&&typeof r.clientId==='string'&&typeof r.clientName==='string'&&
+ typeof r.date==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(r.date)&&Number.isFinite(r.amount)&&r.amount>0&&
+ typeof r.method==='string';
+}
+function persistReceipts(){
+ try{localStorage.setItem(financeKey(),JSON.stringify(receipts));return true}
+ catch(e){msg('Não foi possível salvar recebimentos neste navegador: '+e.message,true);return false}
+}
+function downloadJSON(obj,name){
+ const blob=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'});
+ const u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download=name;a.click();
+ setTimeout(()=>URL.revokeObjectURL(u),1000);
+}
+function renderFinance(){
+ const sold=clients.filter(c=>c.status==='Venda realizada'&&c.amount!=null).reduce((s,c)=>s+Number(c.amount),0);
+ const paid=receipts.reduce((s,r)=>s+r.amount,0);
+ const month=new Date().toLocaleDateString('en-CA').slice(0,7);
+ const monthPaid=receipts.filter(r=>r.date.startsWith(month)).reduce((s,r)=>s+r.amount,0);
+ $('financeSold').textContent=fmt.format(sold);
+ $('financePaid').textContent=fmt.format(paid);
+ $('financeOutstanding').textContent=fmt.format(Math.max(0,sold-paid));
+ $('financeMonth').textContent=fmt.format(monthPaid);
+ const select=$('financeClient'), selected=select.value;select.replaceChildren();
+ for(const c of clients.filter(c=>c.status==='Venda realizada')){
+  const opt=document.createElement('option');opt.value=c.id;opt.textContent=c.name;select.append(opt);
+ }
+ if([...select.options].some(o=>o.value===selected))select.value=selected;
+ const tbody=$('financeRows');tbody.replaceChildren();
+ if(!receipts.length){const tr=document.createElement('tr'),td=document.createElement('td');td.colSpan=5;td.textContent='Nenhum recebimento registrado.';tr.append(td);tbody.append(tr)}
+ for(const r of [...receipts].sort((a,b)=>b.date.localeCompare(a.date))){
+  const tr=document.createElement('tr');
+  const values=[r.date.split('-').reverse().join('/'),r.clientName,fmt.format(r.amount),r.method];
+  for(const val of values){const td=document.createElement('td');td.textContent=val;tr.append(td)}
+  const td=document.createElement('td'),button=document.createElement('button');button.type='button';button.className='btn danger';button.textContent='Excluir';
+  button.onclick=()=>{if(!confirm('Excluir este recebimento?'))return;const old=receipts;receipts=receipts.filter(x=>x.id!==r.id);if(!persistReceipts())receipts=old;renderFinance()};
+  td.append(button);tr.append(td);tbody.append(tr);
+ }
+}
+$('financeDate').value=new Date().toLocaleDateString('en-CA');
+$('financeForm').onsubmit=e=>{
+ e.preventDefault();
+ const client=clients.find(c=>c.id===$('financeClient').value&&c.status==='Venda realizada');
+ const amount=Number($('financeAmount').value),date=$('financeDate').value,method=$('financeMethod').value;
+ if(!client||!Number.isFinite(amount)||amount<=0||!/^\d{4}-\d{2}-\d{2}$/.test(date)){msg('Confira empresa, valor e data do recebimento.',true);return}
+ const receipt={id:crypto.randomUUID(),clientId:client.id,clientName:client.name,amount,date,method};
+ receipts.push(receipt);
+ if(!persistReceipts()){receipts.pop();return}
+ $('financeAmount').value='';renderFinance();msg('Recebimento registrado neste navegador. Exporte um backup para segurança.');
+};
+$('financeExport').onclick=()=>downloadJSON({version:1,exportedAt:new Date().toISOString(),receipts},'black-tech-recebimentos-backup.json');
+$('financeImport').onclick=()=>$('financeFile').click();
+$('financeFile').onchange=async e=>{
+ const file=e.target.files[0];e.target.value='';if(!file)return;
+ if(file.size>2e6){msg('Arquivo de recebimentos muito grande.',true);return}
+ try{
+  const obj=JSON.parse(await file.text());
+  if(obj.version!==1||!Array.isArray(obj.receipts)||obj.receipts.length>10000||!obj.receipts.every(validReceipt))throw Error('Formato de backup inválido');
+  if(!confirm('Importar recebimentos? Registros com o mesmo identificador serão ignorados.'))return;
+  const existing=new Set(receipts.map(r=>r.id));const old=receipts;
+  receipts=[...receipts,...obj.receipts.filter(r=>!existing.has(r.id))];
+  if(!persistReceipts()){receipts=old;return}
+  renderFinance();msg('Recebimentos importados.');
+ }catch(err){msg('Falha na importação: '+err.message,true)}
+};
+
 const PIPELINE_STATUSES=['Prospecto','Contatado','Demonstração','Negociação','Venda realizada','Sem interesse'];
 function renderExtra(){
  renderGoals();
+ renderFinance();
  const today=new Date().toLocaleDateString('en-CA');
  const due=clients.filter(c=>c.next&&c.next<=today&&c.status!=='Venda realizada'&&c.status!=='Sem interesse');
  if($('negotiating'))$('negotiating').textContent=clients.filter(c=>c.status==='Negociação').length;

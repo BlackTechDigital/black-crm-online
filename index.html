@@ -34,6 +34,19 @@ body{background:radial-gradient(ellipse 85% 40% at 50% -10%,#12376c 0%,#070b15 7
 .goal-chip.done{border-color:#318a74;color:#a2e6d0}
 .goal-celebrate{color:#a2e6d0;font-weight:700}
 @media(max-width:700px){.goal-layout{grid-template-columns:1fr}.goal-value{font-size:32px}}
+
+/* Financeiro 3.5 */
+.finance-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin:18px 0}
+.finance-stat{padding:16px;border:1px solid #294269;border-radius:13px;background:#09172c}
+.finance-stat .value{font-size:25px;font-weight:800;margin-top:7px}
+.finance-form{display:grid;grid-template-columns:2fr 1fr 1fr 1.2fr auto;gap:10px;align-items:end}
+.finance-form label{font-size:12px;margin:0 0 6px}
+.finance-form button{min-height:46px}
+.finance-table{width:100%;min-width:650px}
+.finance-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.finance-note{background:#0c213c;border:1px solid #315685;border-radius:10px;padding:12px;font-size:13px;color:#c1d5f2;margin-top:15px}
+@media(max-width:900px){.finance-form{grid-template-columns:1fr 1fr}.finance-form>div:first-child{grid-column:1/-1}}
+@media(max-width:540px){.finance-form{grid-template-columns:1fr}.finance-form>div:first-child{grid-column:auto}}
 </style></head><body><div class="wrap"><div class="top"><div><div class="brand">BLACK <span>CRM</span> <small style="font-size:12px;color:#91a8cc">ONLINE</small></div><div class="muted">Black Tech · Acesso protegido</div></div><button class="btn hide" id="logout">Sair</button></div>
 <div id="setup" class="card hide"><h2>Configurar conexão</h2><p class="muted">Informe somente a chave <strong>sb_publishable_</strong>. Nunca use uma chave secreta.</p><label>Project URL</label><input id="url" value="https://mkotuyaoactpotvizqhg.supabase.co" readonly><label>Publishable key</label><input id="key" placeholder="sb_publishable_..." autocomplete="off"><p><button class="btn primary" id="connect">Conectar</button></p></div>
 <div id="login" class="card hide"><h2>Entrar no BLACK CRM</h2><label>E-mail</label><input type="email" id="email" autocomplete="username"><label>Senha</label><input type="password" id="password" autocomplete="current-password"><p><button class="btn primary" id="signin">Entrar</button></p><p class="hint">Use o usuário criado em Authentication → Users no Supabase. O cadastro público está desativado.</p></div>
@@ -58,10 +71,35 @@ body{background:radial-gradient(ellipse 85% 40% at 50% -10%,#12376c 0%,#070b15 7
  <div id="goalMilestones" class="goal-milestones"></div>
  <p class="hint">Progresso calculado pelo total das empresas com status “Venda realizada” e valor informado. Não representa necessariamente pagamentos recebidos.</p>
 </div>
+<div class="card" id="financeCard">
+ <div class="section-title"><h2>💰 Financeiro Black Tech</h2><span class="eyebrow">RECEBIMENTOS</span></div>
+ <p class="muted">Registre pagamentos efetivamente recebidos e compare com o valor das vendas fechadas.</p>
+ <div class="finance-stats">
+  <div class="finance-stat"><div class="muted">Vendas registradas</div><div class="value" id="financeSold">R$ 0,00</div></div>
+  <div class="finance-stat"><div class="muted">Pagamentos recebidos</div><div class="value" id="financePaid">R$ 0,00</div></div>
+  <div class="finance-stat"><div class="muted">Saldo estimado a receber</div><div class="value" id="financeOutstanding">R$ 0,00</div></div>
+  <div class="finance-stat"><div class="muted">Recebido neste mês</div><div class="value" id="financeMonth">R$ 0,00</div></div>
+ </div>
+ <h3>Registrar recebimento</h3>
+ <form id="financeForm" class="finance-form">
+  <div><label for="financeClient">Empresa</label><select id="financeClient" required></select></div>
+  <div><label for="financeAmount">Valor recebido (R$)</label><input id="financeAmount" type="number" min="0.01" step="0.01" required></div>
+  <div><label for="financeDate">Data do recebimento</label><input id="financeDate" type="date" required></div>
+  <div><label for="financeMethod">Forma de pagamento</label><select id="financeMethod"><option>PIX</option><option>Transferência</option><option>Dinheiro</option><option>Cartão</option><option>Outro</option></select></div>
+  <button class="btn primary" type="submit">+ Registrar</button>
+ </form>
+ <div class="finance-actions" style="margin:18px 0">
+  <button class="btn" type="button" id="financeExport">Exportar recebimentos JSON</button>
+  <button class="btn" type="button" id="financeImport">Importar recebimentos JSON</button>
+  <input id="financeFile" type="file" accept=".json,application/json" class="hide">
+ </div>
+ <div class="tablewrap"><table class="finance-table"><thead><tr><th>Data</th><th>Empresa</th><th>Valor</th><th>Forma</th><th>Ações</th></tr></thead><tbody id="financeRows"><tr><td colspan="5">Nenhum recebimento registrado.</td></tr></tbody></table></div>
+ <p class="finance-note"><strong>Importante:</strong> nesta versão os recebimentos ficam salvos somente neste navegador, separados por conta de usuário. Eles ainda NÃO são sincronizados com Supabase. Exporte um backup JSON após registrar pagamentos e antes de trocar de computador, limpar dados do navegador ou reinstalar o sistema. O saldo a receber é uma estimativa baseada nas vendas marcadas como realizadas; não inclui parcelas futuras nem ajustes de contratos.</p>
+</div>
 <div class="card"><div class="section-title"><h2>Funil de vendas</h2><span class="hint">Arraste empresas entre as etapas para atualizar o status</span></div><div id="pipeline"></div></div>
 <div class="grid"><div class="card"><h2>Distribuição por etapa</h2><div id="statusChart" class="chart-bars"></div></div><div class="card"><h2>Próximos contatos</h2><div id="followups"></div></div></div>
 <div class="card"><h2>Empresas</h2><input id="search" placeholder="Pesquisar empresa ou cidade"><div class="tablewrap"><table><thead><tr><th>Empresa</th><th>Status</th><th>Valor</th><th>Próximo contato</th><th>Ações</th></tr></thead><tbody id="rows"></tbody></table></div></div></div>
 <div id="editpanel" class="card hide"><h2 id="editTitle">Empresa</h2><form id="form"><div class="grid"><div><label>Nome *</label><input name="name" required maxlength="120"></div><div><label>Cidade</label><input name="city" maxlength="100"></div><div><label>WhatsApp</label><input name="phone" maxlength="25"></div><div><label>Status</label><select name="status"><option>Prospecto</option><option>Contatado</option><option>Demonstração</option><option>Negociação</option><option>Venda realizada</option><option>Sem interesse</option></select></div><div><label>Valor (R$)</label><input name="amount" type="number" min="0" step=".01"></div><div><label>Próximo contato</label><input name="next" type="date"></div><div><label>Site</label><input name="url" type="url"></div></div><label>Observações</label><textarea name="notes" rows="3" maxlength="2000"></textarea><p class="row"><button class="btn primary" type="submit">Salvar</button><button class="btn" type="button" id="cancel">Cancelar</button></p></form></div>
 <div id="propanel" class="card hide"><h2>Proposta comercial</h2><label>Empresa</label><select id="propClient"></select><label>Serviço</label><input id="service" value="Criação de site profissional"><label>Descrição</label><textarea id="details" rows="3">Desenvolvimento de site responsivo com apresentação da empresa, serviços e contato por WhatsApp.</textarea><div class="grid"><div><label>Valor (R$)</label><input id="price" type="number" min="0" step=".01"></div><div><label>Prazo</label><input id="deadline" placeholder="Ex.: 10 dias úteis"></div></div><p class="row"><button class="btn primary" id="print">Abrir proposta para salvar em PDF</button><button class="btn" id="closeProp">Fechar</button></p></div>
 <p id="msg" role="status" class="hint"></p></div>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script><script src="app.js?v=3.0-metas-progressivas"></script></body></html>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script><script src="app.js?v=3.5-financeiro-1"></script></body></html>
