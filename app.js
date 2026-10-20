@@ -7,12 +7,12 @@ function show(id){for(const n of ['setup','login','app','editpanel','propanel'])
 function msg(t,err=false){$('msg').textContent=t;$('msg').className=err?'error':'ok'}
 function init(key){if(!window.supabase?.createClient){msg('Biblioteca do Supabase não carregou. Verifique a conexão com a internet.',true);return}
 db=window.supabase.createClient(PROJECT,key,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:false}});
-db.auth.onAuthStateChange((_event,session)=>{const previous=user?.id;user=session?.user||null;if(!user){show('login');clients=[]}else if(previous!==user.id){show('app');restoreGoal();loadReceipts();setTimeout(load,0)}});
-db.auth.getSession().then(({data,error})=>{if(error)throw error;user=data.session?.user||null;show(user?'app':'login');if(user){restoreGoal();loadReceipts();load()}}).catch(e=>msg(e.message,true))}
+db.auth.onAuthStateChange((_event,session)=>{const previous=user?.id;user=session?.user||null;if(!user){show('login');clients=[];receipts=[];financeReady=false}else if(previous!==user.id){show('app');restoreGoal();receipts=[];financeReady=false;setTimeout(async()=>{await load();await loadPayments()},0)}});
+db.auth.getSession().then(({data,error})=>{if(error)throw error;user=data.session?.user||null;show(user?'app':'login');if(user){restoreGoal();receipts=[];financeReady=false;load().then(loadPayments)}}).catch(e=>msg(e.message,true))}
 const saved=localStorage.getItem(K);if(saved&&saved.startsWith('sb_publishable_'))init(saved);else show('setup');
 $('connect').onclick=()=>{const k=$('key').value.trim();if(!/^sb_publishable_[A-Za-z0-9_-]+$/.test(k))return msg('Informe uma publishable key válida.',true);localStorage.setItem(K,k);init(k)};
 $('signin').onclick=async()=>{if(!db)return;msg('Entrando...');const {error}=await db.auth.signInWithPassword({email:$('email').value.trim(),password:$('password').value});$('password').value='';if(error)msg('Não foi possível entrar. Confira e-mail, senha e confirmação da conta.',true)};
-$('logout').onclick=async()=>{if(db)await db.auth.signOut();user=null;clients=[];show('login')};
+$('logout').onclick=async()=>{if(db)await db.auth.signOut();user=null;clients=[];receipts=[];financeReady=false;show('login')};
 function fromDb(c){return {id:c.id,name:c.nome,city:c.cidade||'',phone:c.whatsapp||'',status:c.status,amount:c.valor_proposta,next:c.proximo_contato||'',notes:c.observacoes||'',url:c.site||'',updated:c.atualizado_em||c.criado_em}}
 function toDb(c){return {id:c.id,usuario_id:user.id,nome:c.name,cidade:c.city||null,whatsapp:c.phone||null,status:c.status,valor_proposta:c.amount===null?null:c.amount,proximo_contato:c.next||null,observacoes:c.notes||null,site:c.url||null}}
 async function load(){if(!user)return;msg('Sincronizando...');const {data,error}=await db.from('clientes').select('*').order('criado_em',{ascending:false}).limit(1000);if(error)return msg('Falha ao carregar: '+error.message,true);clients=data.map(fromDb);render();msg('Sincronizado com o Supabase.')}
@@ -44,78 +44,29 @@ $('goalAdvance').onclick=()=>{
  renderGoals();msg('Nova meta desbloqueada! 🚀');
 };
 
-/* Financeiro 3.5 — armazenamento local, isolado por usuário. */
-let receipts=[];
+/* Financeiro 4.0 — Supabase com RLS; migração local opcional. */
+let receipts=[],financeReady=false;
 function financeKey(){return 'blacktech_crm_receipts_v1_'+(user?.id||'guest')}
-function loadReceipts(){
- try{const parsed=JSON.parse(localStorage.getItem(financeKey())||'[]');receipts=Array.isArray(parsed)?parsed.filter(validReceipt):[]}catch{receipts=[]}
-}
-function validReceipt(r){
- return r&&typeof r.id==='string'&&typeof r.clientId==='string'&&typeof r.clientName==='string'&&
- typeof r.date==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(r.date)&&Number.isFinite(r.amount)&&r.amount>0&&
- typeof r.method==='string';
-}
-function persistReceipts(){
- try{localStorage.setItem(financeKey(),JSON.stringify(receipts));return true}
- catch(e){msg('Não foi possível salvar recebimentos neste navegador: '+e.message,true);return false}
-}
-function downloadJSON(obj,name){
- const blob=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'});
- const u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download=name;a.click();
- setTimeout(()=>URL.revokeObjectURL(u),1000);
-}
+function validReceipt(r){return r&&typeof r.id==='string'&&typeof r.clientId==='string'&&typeof r.clientName==='string'&&typeof r.date==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(r.date)&&Number.isFinite(Number(r.amount))&&Number(r.amount)>0&&typeof r.method==='string'}
+function fromPayment(r){return {id:r.id,clientId:r.cliente_id,clientName:r.cliente_nome,amount:Number(r.valor),date:r.data_pagamento,method:r.forma_pagamento}}
+function toPayment(r){return {id:r.id,usuario_id:user.id,cliente_id:r.clientId,cliente_nome:r.clientName,valor:r.amount,data_pagamento:r.date,forma_pagamento:r.method}}
+function downloadJSON(obj,name){const blob=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'}),u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000)}
+async function loadPayments(){if(!user||!db)return;const uid=user.id;financeReady=false;const {data,error}=await db.from('recebimentos').select('*').eq('usuario_id',uid).order('data_pagamento',{ascending:false}).limit(10000);if(user?.id!==uid)return;if(error){receipts=[];renderFinance();msg('Financeiro não conectado: '+error.message+'. Execute o SQL do pacote no Supabase.',true);return}receipts=(data||[]).map(fromPayment);financeReady=true;renderFinance()}
 function renderFinance(){
  const sold=clients.filter(c=>c.status==='Venda realizada'&&c.amount!=null).reduce((s,c)=>s+Number(c.amount),0);
- const paid=receipts.reduce((s,r)=>s+r.amount,0);
- const month=new Date().toLocaleDateString('en-CA').slice(0,7);
- const monthPaid=receipts.filter(r=>r.date.startsWith(month)).reduce((s,r)=>s+r.amount,0);
- $('financeSold').textContent=fmt.format(sold);
- $('financePaid').textContent=fmt.format(paid);
- $('financeOutstanding').textContent=fmt.format(Math.max(0,sold-paid));
- $('financeMonth').textContent=fmt.format(monthPaid);
- const select=$('financeClient'), selected=select.value;select.replaceChildren();
- for(const c of clients.filter(c=>c.status==='Venda realizada')){
-  const opt=document.createElement('option');opt.value=c.id;opt.textContent=c.name;select.append(opt);
- }
- if([...select.options].some(o=>o.value===selected))select.value=selected;
- const tbody=$('financeRows');tbody.replaceChildren();
- if(!receipts.length){const tr=document.createElement('tr'),td=document.createElement('td');td.colSpan=5;td.textContent='Nenhum recebimento registrado.';tr.append(td);tbody.append(tr)}
- for(const r of [...receipts].sort((a,b)=>b.date.localeCompare(a.date))){
-  const tr=document.createElement('tr');
-  const values=[r.date.split('-').reverse().join('/'),r.clientName,fmt.format(r.amount),r.method];
-  for(const val of values){const td=document.createElement('td');td.textContent=val;tr.append(td)}
-  const td=document.createElement('td'),button=document.createElement('button');button.type='button';button.className='btn danger';button.textContent='Excluir';
-  button.onclick=()=>{if(!confirm('Excluir este recebimento?'))return;const old=receipts;receipts=receipts.filter(x=>x.id!==r.id);if(!persistReceipts())receipts=old;renderFinance()};
-  td.append(button);tr.append(td);tbody.append(tr);
- }
+ const paid=receipts.reduce((s,r)=>s+r.amount,0),month=new Date().toLocaleDateString('en-CA').slice(0,7),monthPaid=receipts.filter(r=>r.date.startsWith(month)).reduce((s,r)=>s+r.amount,0);
+ $('financeSold').textContent=fmt.format(sold);$('financePaid').textContent=financeReady?fmt.format(paid):'—';$('financeOutstanding').textContent=financeReady?fmt.format(Math.max(0,sold-paid)):'—';$('financeMonth').textContent=financeReady?fmt.format(monthPaid):'—';
+ const select=$('financeClient'),selected=select.value;select.replaceChildren();for(const c of clients.filter(c=>c.status==='Venda realizada')){const opt=document.createElement('option');opt.value=c.id;opt.textContent=c.name;select.append(opt)}if([...select.options].some(o=>o.value===selected))select.value=selected;
+ const tbody=$('financeRows');tbody.replaceChildren();if(!receipts.length){const tr=document.createElement('tr'),td=document.createElement('td');td.colSpan=5;td.textContent=financeReady?'Nenhum recebimento registrado.':'Aguardando conexão com o financeiro...';tr.append(td);tbody.append(tr)}
+ for(const r of [...receipts].sort((a,b)=>b.date.localeCompare(a.date))){const tr=document.createElement('tr');for(const val of [r.date.split('-').reverse().join('/'),r.clientName,fmt.format(r.amount),r.method]){const td=document.createElement('td');td.textContent=val;tr.append(td)}const td=document.createElement('td'),button=document.createElement('button');button.type='button';button.className='btn danger';button.textContent='Excluir';button.onclick=async()=>{if(!financeReady||!confirm('Excluir definitivamente este recebimento da nuvem?'))return;button.disabled=true;const {error}=await db.from('recebimentos').delete().eq('id',r.id).eq('usuario_id',user.id);if(error){msg('Erro ao excluir: '+error.message,true);button.disabled=false;return}await loadPayments();msg('Recebimento excluído.')};td.append(button);tr.append(td);tbody.append(tr)}
 }
 $('financeDate').value=new Date().toLocaleDateString('en-CA');
-$('financeForm').onsubmit=e=>{
- e.preventDefault();
- const client=clients.find(c=>c.id===$('financeClient').value&&c.status==='Venda realizada');
- const amount=Number($('financeAmount').value),date=$('financeDate').value,method=$('financeMethod').value;
- if(!client||!Number.isFinite(amount)||amount<=0||!/^\d{4}-\d{2}-\d{2}$/.test(date)){msg('Confira empresa, valor e data do recebimento.',true);return}
- const receipt={id:crypto.randomUUID(),clientId:client.id,clientName:client.name,amount,date,method};
- receipts.push(receipt);
- if(!persistReceipts()){receipts.pop();return}
- $('financeAmount').value='';renderFinance();msg('Recebimento registrado neste navegador. Exporte um backup para segurança.');
-};
-$('financeExport').onclick=()=>downloadJSON({version:1,exportedAt:new Date().toISOString(),receipts},'black-tech-recebimentos-backup.json');
+$('financeForm').onsubmit=async e=>{e.preventDefault();if(!financeReady)return msg('Conecte o financeiro ao Supabase antes de registrar.',true);const client=clients.find(c=>c.id===$('financeClient').value&&c.status==='Venda realizada'),amount=Number($('financeAmount').value),date=$('financeDate').value,method=$('financeMethod').value;if(!client||!Number.isFinite(amount)||amount<=0||!/^\d{4}-\d{2}-\d{2}$/.test(date))return msg('Confira empresa, valor e data.',true);const button=e.currentTarget.querySelector('[type=submit]');button.disabled=true;try{const receipt={id:crypto.randomUUID(),clientId:client.id,clientName:client.name,amount,date,method};const {error}=await db.from('recebimentos').insert(toPayment(receipt));if(error)throw Error(error.message);$('financeAmount').value='';await loadPayments();msg('Recebimento salvo no Supabase!')}catch(err){msg('Erro ao salvar: '+err.message,true)}finally{button.disabled=false}};
+$('financeExport').onclick=()=>{if(!financeReady)return msg('Financeiro ainda não conectado.',true);downloadJSON({version:1,exportedAt:new Date().toISOString(),receipts},'black-tech-recebimentos-backup.json')};
+async function importPayments(items){if(!financeReady)throw Error('Financeiro ainda não conectado.');const seen=new Set(receipts.map(r=>r.id));const unique=items.filter(r=>!seen.has(r.id));for(let i=0;i<unique.length;i+=100){const {error}=await db.from('recebimentos').upsert(unique.slice(i,i+100).map(toPayment),{onConflict:'id'});if(error)throw Error(error.message)}await loadPayments();return unique.length}
 $('financeImport').onclick=()=>$('financeFile').click();
-$('financeFile').onchange=async e=>{
- const file=e.target.files[0];e.target.value='';if(!file)return;
- if(file.size>2e6){msg('Arquivo de recebimentos muito grande.',true);return}
- try{
-  const obj=JSON.parse(await file.text());
-  if(obj.version!==1||!Array.isArray(obj.receipts)||obj.receipts.length>10000||!obj.receipts.every(validReceipt))throw Error('Formato de backup inválido');
-  if(!confirm('Importar recebimentos? Registros com o mesmo identificador serão ignorados.'))return;
-  const existing=new Set(receipts.map(r=>r.id));const old=receipts;
-  receipts=[...receipts,...obj.receipts.filter(r=>!existing.has(r.id))];
-  if(!persistReceipts()){receipts=old;return}
-  renderFinance();msg('Recebimentos importados.');
- }catch(err){msg('Falha na importação: '+err.message,true)}
-};
-
+$('financeFile').onchange=async e=>{const file=e.target.files[0];e.target.value='';if(!file)return;if(file.size>2e6)return msg('Backup muito grande.',true);try{const obj=JSON.parse(await file.text());if(obj.version!==1||!Array.isArray(obj.receipts)||obj.receipts.length>10000||!obj.receipts.every(validReceipt))throw Error('Backup inválido');if(!confirm('Importar '+obj.receipts.length+' recebimentos para a nuvem? Confira se o backup pertence à sua conta.'))return;const n=await importPayments(obj.receipts);msg(n+' recebimentos novos importados para o Supabase.')}catch(err){msg('Falha na importação: '+err.message,true)}};
+$('financeMigrate').onclick=async()=>{try{const local=JSON.parse(localStorage.getItem(financeKey())||'[]');if(!Array.isArray(local)||!local.length)return msg('Nenhum pagamento local 3.5 encontrado neste navegador. Se tiver backup, use Importar backup.',true);if(!local.every(validReceipt))throw Error('Registros locais inválidos.');if(!confirm('Migrar '+local.length+' recebimentos do CRM 3.5 para o Supabase? Os dados locais serão mantidos como backup.'))return;const n=await importPayments(local);msg('Migração concluída: '+n+' novos recebimentos na nuvem. Os locais foram preservados.')}catch(err){msg('Falha na migração: '+err.message,true)}};
 const PIPELINE_STATUSES=['Prospecto','Contatado','Demonstração','Negociação','Venda realizada','Sem interesse'];
 function renderExtra(){
  renderGoals();
